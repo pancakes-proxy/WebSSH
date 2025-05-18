@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Web SSH</title>
+  <!-- Include xterm.js CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #000;
+      color: #fff;
+      font-family: monospace;
+    }
+    #terminal {
+      height: 100vh;
+      width: 100vw;
+    }
+    #connection-form {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.85);
+      padding: 10px;
+      border-radius: 4px;
+      z-index: 1000;
+      color: #000;
+    }
+    #connection-form input {
+      margin: 5px 0;
+      padding: 5px;
+      width: 220px;
+    }
+    #connection-form button {
+      margin-right: 5px;
+      padding: 5px 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="connection-form">
+    <!-- New button to add an SSH key -->
+    <button id="addKeyBtn" title="Click to add your SSH key">Add SSH Key</button>
+    <br/>
+    <input type="text" id="host" placeholder="Host (e.g., example.com)" required />
+    <input type="number" id="port" placeholder="Port (default 22)" />
+    <input type="text" id="username" placeholder="Username" required />
+    <!-- Password is optional if using an SSH key -->
+    <input type="password" id="password" placeholder="Password (optional)" />
+    <button id="connectBtn">Connect</button>
+  </div>
+  <div id="terminal"></div>
+
+  <!-- Include xterm.js library -->
+  <script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
+  <script>
+    // Initialize the terminal display using xterm.js
+    const term = new Terminal();
+    term.open(document.getElementById('terminal'));
+
+    let socket;
+    const connectBtn = document.getElementById('connectBtn');
+    const addKeyBtn = document.getElementById('addKeyBtn');
+
+    // Event handler for the "Add SSH Key" button.
+    addKeyBtn.addEventListener('click', () => {
+      const key = prompt("Paste your SSH Private Key here:");
+      if (key && key.trim() !== "") {
+        localStorage.setItem('sshKey', key);
+        alert("SSH Key saved locally. It will be used for authentication during connection.");
+      } else {
+        alert("No key provided.");
+      }
+    });
+
+    connectBtn.addEventListener('click', () => {
+      // Retrieve connection details from form fields
+      const host = document.getElementById('host').value.trim();
+      const port = document.getElementById('port').value.trim() || '22';
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      
+      if (!host || !username) {
+        alert('Please fill in the required fields (host and username).');
+        return;
+      }
+
+      // Prepare the configuration object.
+      // If an SSH key is saved in localStorage, use it for authentication.
+      const config = {
+        host,
+        port,
+        username,
+        password // This may be optional
+      };
+      const storedKey = localStorage.getItem('sshKey');
+      if (storedKey && storedKey.trim() !== "") {
+        config.privateKey = storedKey;
+      }
+
+      // Use the secure WebSocket protocol when applicable.
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      socket = new WebSocket(wsProtocol + '://' + window.location.host + '/ssh');
+
+      socket.addEventListener('open', () => {
+        // Send our configuration to the server as a JSON string.
+        socket.send(JSON.stringify(config));
+        // Optionally hide the connection form after connecting.
+        document.getElementById('connection-form').style.display = 'none';
+      });
+
+      socket.addEventListener('message', (event) => {
+        term.write(event.data);
+      });
+
+      socket.addEventListener('close', () => {
+        term.write('\r\n*** Connection closed ***\r\n');
+        document.getElementById('connection-form').style.display = 'block';
+      });
+
+      socket.addEventListener('error', () => {
+        term.write('\r\n*** WebSocket error occurred ***\r\n');
+      });
+
+      // Relay keystrokes from the terminal to the SSH shell.
+      term.onData(data => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(data);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
